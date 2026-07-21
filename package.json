@@ -1,0 +1,12 @@
+{
+  "name": "website-crawler",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "takescreenshots": "./index.js"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0",
+    "prompts": "^2.4.2"
+  }
+}
