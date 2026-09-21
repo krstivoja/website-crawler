@@ -37,12 +37,25 @@ The CLI will prompt you for:
 |--------|---------|-------------|
 | Browser | Chromium | Chromium, Firefox or WebKit (Safari) |
 | URL | — | The website to crawl (include `https://`) |
+| Cookie consent | Approve in browser now (first run) / Use saved consent | Reuse, create or skip a saved cookie consent session |
 | Pause between pages | 500ms | Delay between navigating to each page |
 | Wait before screenshot | 1000ms | Time to wait for JS animations to settle |
 | Full page screenshot | Yes | Capture entire page height vs viewport only |
 | Screen width | 1280px | Viewport width in pixels |
 | Pixel density | 2x | Device scale factor: 1x, 2x (retina) or 3x |
 | Max pages | 50 | Stop crawling after this many pages |
+
+## Cookie consent
+
+To keep cookie popups out of screenshots, approve consent once by hand.
+With "Approve in browser now", a visible browser opens on the start URL.
+Handle the cookie popup, then close the tab to continue.
+The session is saved to `~/.takescreenshots/<hostname>.json`.
+This file is private: it contains cookies, is written with owner-only permissions, and lives outside the repo.
+The whole session is saved (cookies and localStorage), so other choices made in that window — like switching the site language — carry into the crawl too.
+Later runs for the same site default to "Use saved consent" and reuse it without opening a browser.
+To reset, delete the file or pick "Approve in browser now" again.
+Sites are keyed by exact hostname, so `www.example.com` and `example.com` are separate.
 
 ## Output
 
