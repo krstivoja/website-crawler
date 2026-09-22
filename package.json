@@ -5,6 +5,12 @@
   "bin": {
     "takescreenshots": "./index.js"
   },
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "playwright": "^1.52.0",
     "prompts": "^2.4.2"
