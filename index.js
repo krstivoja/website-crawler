@@ -22,8 +22,25 @@ export function consentPath(hostname) {
   return join(homedir(), '.takescreenshots', `${hostname}.json`);
 }
 
+export function parseUrls(input) {
+  return input
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isValidUrl(v) {
+  try {
+    new URL(v);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function consentChoices(url) {
-  const saved = existsSync(consentPath(new URL(url).hostname));
+  const [firstUrl] = parseUrls(url);
+  const saved = existsSync(consentPath(new URL(firstUrl).hostname));
   return [
     ...(saved ? [{ title: 'Use saved consent', value: 'saved' }] : []),
     { title: 'Approve in browser now', value: 'approve' },
@@ -48,14 +65,11 @@ async function askQuestions() {
     {
       type: 'text',
       name: 'url',
-      message: 'URL to crawl',
+      message: 'URL(s) to crawl (comma or newline separated for a page list)',
       validate: (v) => {
-        try {
-          new URL(v);
-          return true;
-        } catch {
-          return 'Enter a valid URL (include https://)';
-        }
+        const invalid = parseUrls(v).filter((u) => !isValidUrl(u));
+        if (invalid.length > 0) return `Invalid URL: ${invalid[0]}`;
+        return parseUrls(v).length > 0 || 'Enter at least one valid URL (include https://)';
       },
     },
     {
@@ -101,7 +115,7 @@ async function askQuestions() {
       initial: 1,
     },
     {
-      type: 'number',
+      type: (prev, values) => (parseUrls(values.url).length > 1 ? null : 'number'),
       name: 'maxPages',
       message: 'Maximum number of pages',
       initial: defaults.maxPages,
@@ -192,9 +206,56 @@ async function approveConsent(browserType, url, contextOptions, file) {
   return saved;
 }
 
+async function shootList(context, urls, outputDir, { pause, wait, fullPage }) {
+  let count = 0;
+
+  for (const pageUrl of urls) {
+    count++;
+    const { hostname, pathname } = new URL(pageUrl);
+    const slug = slugify(`${hostname}${pathname}`);
+    const filename = `${String(count).padStart(3, '0')}-${slug}.png`;
+
+    console.log(`[${count}/${urls.length}] ${pageUrl}`);
+
+    const page = await context.newPage();
+
+    try {
+      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+
+      await page.evaluate(async () => {
+        const step = window.innerHeight;
+        const maxScroll = document.body.scrollHeight;
+        for (let y = 0; y < maxScroll; y += step) {
+          window.scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        window.scrollTo(0, 0);
+      });
+
+      await page.waitForTimeout(wait);
+      await page.screenshot({
+        path: join(outputDir, filename),
+        fullPage,
+      });
+    } catch (err) {
+      console.log(`  ⚠ Failed: ${err.message}`);
+    }
+
+    await page.close();
+
+    if (count < urls.length) {
+      await new Promise((r) => setTimeout(r, pause));
+    }
+  }
+
+  return count;
+}
+
 async function crawl(config) {
   const { url, consent, pause, wait, fullPage, width, density, maxPages } = config;
-  const baseUrl = new URL(url);
+  const urls = parseUrls(url);
+  const listMode = urls.length > 1;
+  const baseUrl = new URL(urls[0]);
   const baseOrigin = baseUrl.origin;
 
   const folderName = `screenshot-${timestamp()}`;
@@ -209,7 +270,7 @@ async function crawl(config) {
 
   let stateFile = null;
   if (consent === 'approve') {
-    stateFile = await approveConsent(browserType, url, contextOptions, consentPath(baseUrl.hostname));
+    stateFile = await approveConsent(browserType, urls[0], contextOptions, consentPath(baseUrl.hostname));
   } else if (consent === 'saved') {
     stateFile = consentPath(baseUrl.hostname);
   }
@@ -220,6 +281,13 @@ async function crawl(config) {
 
   const browser = await browserType.launch();
   const context = await browser.newContext(contextOptions);
+
+  if (listMode) {
+    const count = await shootList(context, urls, outputDir, { pause, wait, fullPage });
+    await browser.close();
+    console.log(`\nDone. ${count} screenshots saved to:\n${outputDir}`);
+    return;
+  }
 
   const visited = new Set();
   const queue = [baseUrl.pathname];

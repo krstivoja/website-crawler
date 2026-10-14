@@ -36,7 +36,7 @@ The CLI will prompt you for:
 | Prompt | Default | Description |
 |--------|---------|-------------|
 | Browser | Chromium | Chromium, Firefox or WebKit (Safari) |
-| URL | — | The website to crawl (include `https://`) |
+| URL(s) | — | One URL to crawl, or multiple exact URLs (comma- or newline-separated) to screenshot as-is, no crawling |
 | Cookie consent | Approve in browser now (first run) / Use saved consent | Reuse, create or skip a saved cookie consent session |
 | Pause between pages | 500ms | Delay between navigating to each page |
 | Wait before screenshot | 1000ms | Time to wait for JS animations to settle |
@@ -73,7 +73,8 @@ Files are named with a sequential number and a slug derived from the URL path.
 
 ## How it works
 
-- Discovers pages by following same-origin `<a href>` links (breadth-first)
+- Single URL: discovers pages by following same-origin `<a href>` links (breadth-first)
+- Multiple URLs (comma or newline separated): screenshots exactly those pages, no link-following, any origin
 - Skips anchors, mailto/tel links, PDFs, images, and other non-HTML resources
 - Deduplicates pages by pathname (ignores query strings and fragments)
 - Public pages only — no auth support
