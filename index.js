@@ -212,8 +212,89 @@ async function approveConsent(browserType, url, contextOptions, file) {
   return saved;
 }
 
+const pageHeight = (page) =>
+  page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+
+const nextFrame = (frame) => Promise.race([
+  frame.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {}),
+  new Promise((r) => setTimeout(r, 2000)),
+]);
+
+// Chromium does not paint cross-site iframes (comments, embeds) that are
+// outside the window, and a full-page shot does not count as inside, so they
+// come out blank. Making the window as tall as the page puts every iframe in
+// view. Pages whose height follows the window (100vh sections) would stretch,
+// so those fall back to a normal full-page shot.
+async function shootFullPage(page, path) {
+  const viewport = page.viewportSize();
+  const height = await pageHeight(page);
+  try {
+    await page.setViewportSize({ width: viewport.width, height });
+    await Promise.all(page.frames().map(nextFrame));
+    await page.waitForTimeout(300);
+    if ((await pageHeight(page)) > height + 50) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(300);
+    }
+  } catch {
+    await page.setViewportSize(viewport).catch(() => {});
+  }
+  await page.screenshot({ path, fullPage: true });
+  await page.setViewportSize(viewport).catch(() => {});
+}
+
+async function capture(page, pageUrl, path, { wait, fullPage }) {
+  await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+
+  // Scroll down to trigger lazy-loaded images and embeds
+  await page.evaluate(async () => {
+    const step = window.innerHeight;
+    const maxScroll = document.body.scrollHeight;
+    for (let y = 0; y < maxScroll; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+
+  await page.waitForTimeout(wait);
+
+  // Instant, so CSS smooth scrolling cannot leave sticky headers mid-page
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await page.waitForTimeout(300);
+
+  if (fullPage) await shootFullPage(page, path);
+  else await page.screenshot({ path });
+}
+
+// urls.md index of every page visited: URL, screenshot link or failure reason
+export function buildUrlsMarkdown(entries) {
+  const cell = (text) => text.replace(/\|/g, '\\|');
+  const failed = entries.filter((e) => e.error).length;
+  const lines = [
+    '# Screenshots',
+    '',
+    `${entries.length} pages, ${entries.length - failed} screenshots, ${failed} failed`,
+    '',
+    '| # | URL | Screenshot |',
+    '|---|-----|------------|',
+  ];
+  entries.forEach((e, i) => {
+    const result = e.error
+      ? `⚠ Failed: ${cell(e.error.split('\n')[0])}`
+      : `[${e.file}](${encodeURI(e.file)})`;
+    lines.push(`| ${i + 1} | <${e.url}> | ${result} |`);
+  });
+  return `${lines.join('\n')}\n`;
+}
+
+async function recordPage(outputDir, entries, entry) {
+  entries.push(entry);
+  await writeFile(join(outputDir, 'urls.md'), buildUrlsMarkdown(entries));
+}
+
 async function shootList(context, urls, outputDir, { pause, wait, fullPage }) {
   let count = 0;
+  const entries = [];
 
   for (const pageUrl of urls) {
     count++;
@@ -226,25 +307,11 @@ async function shootList(context, urls, outputDir, { pause, wait, fullPage }) {
     const page = await context.newPage();
 
     try {
-      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
-
-      await page.evaluate(async () => {
-        const step = window.innerHeight;
-        const maxScroll = document.body.scrollHeight;
-        for (let y = 0; y < maxScroll; y += step) {
-          window.scrollTo(0, y);
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        window.scrollTo(0, 0);
-      });
-
-      await page.waitForTimeout(wait);
-      await page.screenshot({
-        path: join(outputDir, filename),
-        fullPage,
-      });
+      await capture(page, pageUrl, join(outputDir, filename), { wait, fullPage });
+      await recordPage(outputDir, entries, { url: pageUrl, file: filename });
     } catch (err) {
       console.log(`  ⚠ Failed: ${err.message}`);
+      await recordPage(outputDir, entries, { url: pageUrl, file: filename, error: err.message });
     }
 
     await page.close();
@@ -254,7 +321,7 @@ async function shootList(context, urls, outputDir, { pause, wait, fullPage }) {
     }
   }
 
-  return count;
+  return entries.filter((e) => !e.error).length;
 }
 
 async function crawl(config) {
@@ -296,6 +363,7 @@ async function crawl(config) {
   }
 
   const scope = scopeOf(baseUrl.pathname);
+  const entries = [];
   const visited = new Set();
   const queue = [baseUrl.pathname];
   visited.add(baseUrl.pathname);
@@ -314,24 +382,8 @@ async function crawl(config) {
     const page = await context.newPage();
 
     try {
-      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
-
-      // Scroll down to trigger lazy-loaded images, then back to top
-      await page.evaluate(async () => {
-        const step = window.innerHeight;
-        const maxScroll = document.body.scrollHeight;
-        for (let y = 0; y < maxScroll; y += step) {
-          window.scrollTo(0, y);
-          await new Promise((r) => setTimeout(r, 100));
-        }
-        window.scrollTo(0, 0);
-      });
-
-      await page.waitForTimeout(wait);
-      await page.screenshot({
-        path: join(outputDir, filename),
-        fullPage,
-      });
+      await capture(page, pageUrl, join(outputDir, filename), { wait, fullPage });
+      await recordPage(outputDir, entries, { url: pageUrl, file: filename });
 
       const links = await page.$$eval('a[href]', (anchors) =>
         anchors.map((a) => a.getAttribute('href'))
@@ -346,6 +398,7 @@ async function crawl(config) {
       }
     } catch (err) {
       console.log(`  ⚠ Failed: ${err.message}`);
+      await recordPage(outputDir, entries, { url: pageUrl, file: filename, error: err.message });
     }
 
     await page.close();
@@ -356,7 +409,8 @@ async function crawl(config) {
   }
 
   await browser.close();
-  console.log(`\nDone. ${count} screenshots saved to:\n${outputDir}`);
+  const shots = entries.filter((e) => !e.error).length;
+  console.log(`\nDone. ${shots} screenshots saved to:\n${outputDir}`);
 }
 
 // Run only as CLI (realpath resolves the npm link symlink), not when imported

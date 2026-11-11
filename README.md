@@ -76,6 +76,7 @@ Files are named with a sequential number and a slug derived from the URL path.
 - Single URL: discovers pages by following same-origin `<a href>` links (breadth-first), staying under the start path — `https://site.com/blog` crawls only `/blog` and `/blog/...`; start at the root to crawl the whole site
 - Multiple URLs (comma or newline separated): screenshots exactly those pages, no link-following, any origin
 - Skips anchors, mailto/tel links, PDFs, images, and other non-HTML resources
+- Writes `urls.md` next to the screenshots: every visited URL with a link to its screenshot, or the reason it failed (updated after each page, so it stays complete if you stop a crawl early)
 - Deduplicates pages by pathname (ignores query strings and fragments)
 - Public pages only — no auth support
 
