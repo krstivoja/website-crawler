@@ -153,11 +153,17 @@ function timestamp() {
   ].join('');
 }
 
-function isValidLink(href, baseOrigin) {
+// Crawl scope: the start path without trailing slash; '' means the whole site
+export function scopeOf(pathname) {
+  return pathname.replace(/\/+$/, '');
+}
+
+export function isValidLink(href, baseOrigin, scope = '') {
   try {
     const url = new URL(href, baseOrigin);
     if (url.origin !== baseOrigin) return null;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (scope && url.pathname !== scope && !url.pathname.startsWith(`${scope}/`)) return null;
     const ext = url.pathname.split('.').pop().toLowerCase();
     const skipExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'svg', 'zip', 'mp4', 'mp3'];
     if (skipExtensions.includes(ext)) return null;
@@ -289,6 +295,7 @@ async function crawl(config) {
     return;
   }
 
+  const scope = scopeOf(baseUrl.pathname);
   const visited = new Set();
   const queue = [baseUrl.pathname];
   visited.add(baseUrl.pathname);
@@ -331,7 +338,7 @@ async function crawl(config) {
       );
 
       for (const href of links) {
-        const pathname = isValidLink(href, baseOrigin);
+        const pathname = isValidLink(href, baseOrigin, scope);
         if (pathname && !visited.has(pathname)) {
           visited.add(pathname);
           queue.push(pathname);
