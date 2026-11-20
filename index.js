@@ -2,10 +2,10 @@
 
 import { chromium, firefox, webkit } from 'playwright';
 import prompts from 'prompts';
-import { existsSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -21,6 +21,30 @@ const defaults = {
 // Saved consent state per exact hostname (www and apex are separate)
 export function consentPath(hostname) {
   return join(homedir(), '.takescreenshots', `${hostname}.json`);
+}
+
+// Last chosen output folder, offered as the default on the next run
+const settingsPath = () => join(homedir(), '.takescreenshots', 'settings.json');
+
+function loadSettings() {
+  try {
+    return JSON.parse(readFileSync(settingsPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function saveSettings(settings) {
+  await mkdir(dirname(settingsPath()), { recursive: true, mode: 0o700 });
+  await writeFile(settingsPath(), JSON.stringify(settings, null, 2));
+}
+
+// "~/shots" -> absolute path; relative paths resolve from the current folder
+export function resolveDir(input) {
+  const value = input.trim();
+  if (value === '~') return homedir();
+  if (value.startsWith('~/')) return join(homedir(), value.slice(2));
+  return resolve(value);
 }
 
 export function parseUrls(input) {
@@ -79,6 +103,13 @@ async function askQuestions() {
       message: 'Cookie consent',
       choices: (prev, values) => consentChoices(values.url),
       initial: 0,
+    },
+    {
+      type: 'text',
+      name: 'saveDir',
+      message: 'Save screenshots to',
+      initial: loadSettings().saveDir || '~/Downloads',
+      validate: (v) => v.trim().length > 0 || 'Enter a folder path',
     },
     {
       type: 'number',
@@ -373,8 +404,9 @@ async function crawl(config) {
   const browser = await launchBrowser(config.browser);
 
   const folderName = `screenshot-${timestamp()}`;
-  const outputDir = join(homedir(), 'Downloads', folderName);
+  const outputDir = join(resolveDir(config.saveDir || '~/Downloads'), folderName);
   await mkdir(outputDir, { recursive: true });
+  await saveSettings({ ...loadSettings(), saveDir: config.saveDir });
 
   console.log(`\nSaving to: ${outputDir}\n`);
 

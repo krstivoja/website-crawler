@@ -38,6 +38,7 @@ The CLI will prompt you for:
 | Browser | Chromium | Chromium, Firefox or WebKit (Safari) |
 | URL(s) | — | One URL to crawl, or multiple exact URLs (comma- or newline-separated) to screenshot as-is, no crawling |
 | Cookie consent | Approve in browser now (first run) / Use saved consent | Reuse, create or skip a saved cookie consent session |
+| Save screenshots to | ~/Downloads, then the last folder used | Folder that gets the `screenshot-…` subfolder; `~` works, and a missing folder is created |
 | Pause between pages | 500ms | Delay between navigating to each page |
 | Wait before screenshot | 1000ms | Time to wait for JS animations to settle |
 | Full page screenshot | Yes | Capture entire page height vs viewport only |
@@ -59,7 +60,7 @@ Sites are keyed by exact hostname, so `www.example.com` and `example.com` are se
 
 ## Output
 
-Screenshots are saved to:
+Screenshots are saved to a timestamped subfolder of the chosen folder (default `~/Downloads`):
 
 ```
 ~/Downloads/screenshot-YYYYMMDD-HHmmss/
