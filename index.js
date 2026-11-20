@@ -6,7 +6,8 @@ import { existsSync, realpathSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
-import { pathToFileURL } from 'url';
+import { createRequire } from 'module';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const defaults = {
   pause: 500,
@@ -173,9 +174,43 @@ export function isValidLink(href, baseOrigin, scope = '') {
   }
 }
 
+// Playwright's own error only says "npx playwright install"; name the browser,
+// the folder to run it in, and the Playwright version that needs it
+export function missingBrowserMessage(browserName, crawlerDir, playwrightVersion) {
+  const label = { chromium: 'Chromium', firefox: 'Firefox', webkit: 'WebKit' }[browserName] ?? browserName;
+  const version = playwrightVersion ? ` (Playwright ${playwrightVersion})` : '';
+  return [
+    `✖ ${label} is not installed for this crawler${version}.`,
+    '',
+    'Install it from the crawler folder:',
+    '',
+    `  cd ${crawlerDir}`,
+    `  npx playwright install ${browserName}`,
+    '',
+    'Run it there, not elsewhere: npx in another folder installs browsers for a different Playwright version.',
+  ].join('\n');
+}
+
+class MissingBrowserError extends Error {}
+
+async function launchBrowser(browserName, options) {
+  const browserType = { chromium, firefox, webkit }[browserName];
+  try {
+    return await browserType.launch(options);
+  } catch (err) {
+    if (!/Executable doesn't exist/.test(err.message)) throw err;
+    let version = '';
+    try {
+      version = createRequire(import.meta.url)('playwright/package.json').version;
+    } catch {}
+    const crawlerDir = dirname(fileURLToPath(import.meta.url));
+    throw new MissingBrowserError(missingBrowserMessage(browserName, crawlerDir, version));
+  }
+}
+
 // Headed browser: user handles the popup, closing the tab saves the session
-async function approveConsent(browserType, url, contextOptions, file) {
-  const browser = await browserType.launch({ headless: false });
+async function approveConsent(browserName, url, contextOptions, file) {
+  const browser = await launchBrowser(browserName, { headless: false });
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -331,19 +366,20 @@ async function crawl(config) {
   const baseUrl = new URL(urls[0]);
   const baseOrigin = baseUrl.origin;
 
+  // Launch first, so a missing browser fails before any folder is created
+  const browser = await launchBrowser(config.browser);
+
   const folderName = `screenshot-${timestamp()}`;
   const outputDir = join(homedir(), 'Downloads', folderName);
   await mkdir(outputDir, { recursive: true });
 
   console.log(`\nSaving to: ${outputDir}\n`);
 
-  const browsers = { chromium, firefox, webkit };
-  const browserType = browsers[config.browser];
   const contextOptions = { viewport: { width, height: 800 }, deviceScaleFactor: density };
 
   let stateFile = null;
   if (consent === 'approve') {
-    stateFile = await approveConsent(browserType, urls[0], contextOptions, consentPath(baseUrl.hostname));
+    stateFile = await approveConsent(config.browser, urls[0], contextOptions, consentPath(baseUrl.hostname));
   } else if (consent === 'saved') {
     stateFile = consentPath(baseUrl.hostname);
   }
@@ -352,7 +388,6 @@ async function crawl(config) {
     contextOptions.storageState = stateFile;
   }
 
-  const browser = await browserType.launch();
   const context = await browser.newContext(contextOptions);
 
   if (listMode) {
@@ -419,5 +454,11 @@ const isMain = process.argv[1]
 
 if (isMain) {
   const config = await askQuestions();
-  await crawl(config);
+  try {
+    await crawl(config);
+  } catch (err) {
+    if (!(err instanceof MissingBrowserError)) throw err;
+    console.error(`\n${err.message}\n`);
+    process.exit(1);
+  }
 }
