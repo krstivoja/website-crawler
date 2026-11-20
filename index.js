@@ -279,7 +279,10 @@ async function shootFullPage(page, path) {
 }
 
 async function capture(page, pageUrl, path, { wait, fullPage }) {
-  await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  // Sites with analytics beacons or polling never go network-idle, so only
+  // the load event is required; idle is a best-effort extra wait.
+  await page.goto(pageUrl, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
   // Scroll down to trigger lazy-loaded images and embeds
   await page.evaluate(async () => {
